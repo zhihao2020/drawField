@@ -1,0 +1,14 @@
+__pycache__/
+*.db
+.idea/
+ProgramLog.log
+build/
+dist/
+Qtdesigner/
+*.spec
+*.csv
+*.zip
+*.ini
+*.nsi
+*.exe
+*.ico
