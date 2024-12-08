@@ -7,11 +7,13 @@ import webbrowser
 import sys
 from svgpathtools import svg2paths
 from ui.modify import Ui_MainWindow
-
+import os
+import psutil
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.colors import LinearSegmentedColormap
+from cal import CalMain
 
 class LoadMain(QMainWindow, Ui_MainWindow, QObject):
     def __init__(self):
@@ -24,7 +26,7 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         # Create a PlotWidget for displaying graphs
         self.graphWidget = pg.PlotWidget(self)
         self.ui.verticalLayout.replaceWidget(self.ui.graphWidget, self.graphWidget)
-    
+
 
         self.ui.action.triggered.connect(self.about_soft)
         self.ui.action_svg.triggered.connect(self.load_file)
@@ -35,10 +37,10 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         # 导出场图数据
         self.ui.pushButton.clicked.connect(self.save_csv)
         # 计算波及区域
-        # self.ui.pushButton_3.clicked.connect(self.analyse_involve)
+        self.ui.action_2.triggered.connect(self.analyse_involve) 
         # 加载svg文件
         # self.ui.pushButton_4.clicked.connect(self.load_svg_line)
-
+        self.cal_win = CalMain()
          # 定义颜色映射
         rgb_colors = [
             (255/255, 255/255, 204/255),
@@ -58,6 +60,21 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         # 创建自定义颜色映射
         self.custom_cmap = LinearSegmentedColormap.from_list('custom_cmap', rgb_colors)
 
+    def checkLive(self):
+        n = 0 #计数
+        for proc in psutil.process_iter():
+            if proc.name() == "draw_field.exe":
+                n += 1
+        if n > 1:
+            QMessageBox.information(self,"提示","软件已打开",QMessageBox.Yes)
+            sys.exit()
+
+    def check_file(self):
+        if os.path.exists('1.xyz'):
+            os.rename('1.xyz', '1.csv')
+        else:
+            QMessageBox.warning(self, "警告", "请先加载SVG文件")
+            return False
     def load_svg_line(self):
         self.graphWidget.scene().sigMouseClicked.connect(self.change)
         if self.filename:  
@@ -76,6 +93,8 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
     def get_path(self, event):
         self.get_pos(event)
         # 读取CSV文件
+        if self.check_file() == False:
+            return
         df = pd.read_csv(r'1.csv')
         x=  self.relative_x
         y=self.relative_y 
@@ -142,48 +161,18 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         self.darw_field()
 
     def analyse_involve(self):
-        # 增加按钮 可以计算波及面积
-        self.graphWidget.scene().sigMouseClicked.connect(self.change)
-
-        df = pd.read_csv(r'temp.csv')
-        # 提取X, Y, Z数据
-        X = df['X'].values
-        Y = df['Y'].values
-        Z = df['Z'].values
-
-        # 将X, Y, Z数据转换为网格数据
-        xi = np.linspace(min(X), max(X), 400)
-        yi = np.linspace(min(Y), max(Y), 400)
-        X_grid, Y_grid = np.meshgrid(xi, yi)
-        Z_grid = griddata((X, Y), Z, (X_grid, Y_grid), method='nearest')
-
-        # 清除之前的图形
-        self.graphWidget.clear()
-
-        # 创建一个FigureCanvasQTAgg对象
-        self.canvas = FigureCanvasQTAgg(plt.Figure())
-        ax = self.canvas.figure.subplots()
-
-        # 设置等值线层次 
-        levels = np.linspace(self.low_colorbar, self.high_colorbar, 100)  # 在10到60之间创建100个等值线层次
-
+        cal_area_name, _ = QFileDialog.getOpenFileName(self, "加载PNG文件", "", "CSV Files (*.png)")
+        if cal_area_name:
+            with open("data.io", "w") as f:
+                f.write("cal_area_name: " + str(cal_area_name))
+            self.cal_win.setWindowModality(Qt.ApplicationModal)
+            self.cal_win.load_png()
+            self.cal_win.show()
         
-        # 绘制等值线图
-        contour = ax.contourf(X_grid, Y_grid, Z_grid, levels=levels, cmap=self.custom_cmap)
-
-        cbar = self.canvas.figure.colorbar(contour, ticks=np.linspace(self.low_colorbar, self.high_colorbar, num=11), format='%.0f')  
-
-        # 绘制等值线图
-        levels = np.linspace(self.low_colorbar, self.high_colorbar, 100)
-        contour = pg.ImageItem(image=Z_grid.T, levels=(self.low_colorbar, self.high_colorbar))
-        contour.setLookupTable(pg.colormap.getFromMatplotlib('viridis').getLookupTable())
-        self.graphWidget.addItem(contour)
-
-        # 添加颜色条  
-        cbar.setImageItem(contour, insert_in=self.graphWidget.plotItem)
-    
     def darw_field(self):  
         # 读取CSV文件
+        if self.check_file() == False:
+            returnos.rename('1.xyz', '1.csv')
         df = pd.read_csv(r'1.csv')
         
         # 提取X, Y, Z数据
@@ -212,6 +201,9 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
                 grid_data['Z'].append(Z_grid[i, j])
         grid_df = pd.DataFrame(grid_data)
         grid_df.to_csv(r'temp.csv', index=False)
+        # 将temp.csv改名为temp.xyz
+        os.rename('temp.csv', 'temp.xyz')
+        
 
         # 创建一个新的窗口
         self.field_window = QMainWindow()
@@ -267,8 +259,11 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         file_path, _ = QFileDialog.getSaveFileName(self, "保存CSV文件", "", "CSV Files (*.csv);;All Files (*)", options=options)
         if file_path:
             # 读取CSV文件
+            if self.check_file() == False:
+                return  
             df = pd.read_csv(r'1.csv')
             # 提取X, Y, Z数据
+   
             X = df['X'].values
             Y = df['Y'].values
             Z = df['Z'].values
@@ -281,6 +276,7 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
 
             # 创建新的DataFrame存储网格数据
             grid_data = {
+        
             'X': [],
             'Y': [],
             'Z': []
@@ -288,6 +284,7 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
 
             for i in range(len(xi)):
                 for j in range(len(yi)):
+
                     grid_data['X'].append(X_grid[i, j])
                     grid_data['Y'].append(Y_grid[i, j])
                     grid_data['Z'].append(Z_grid[i, j])
@@ -295,10 +292,12 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
             grid_df = pd.DataFrame(grid_data)
             grid_df.to_csv(file_path, index=False)
             QMessageBox.information(self, "保存CSV", f"CSV文件已保存到 {file_path}")
+            if os.path.exists('1.csv'):
+                os.rename('1.csv', '1.xyz')
+           
 
     def save_image(self):
         options = QFileDialog.Options()
-        
         file_path, _ = QFileDialog.getSaveFileName(self, "保存图片", "", "PNG Files (*.png);;All Files (*)", options=options)
         if file_path:
             # 保存当前绘制的图像
@@ -331,6 +330,8 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         new_z_value = self.input_box.text()
 
         # 读取CSV文件
+        if self.check_file() == False:
+            return
         df = pd.read_csv(r'1.csv')
         reply = QMessageBox.question(self, '确认修改', f'是否将Path {self.nearest_path} 修改为 {new_z_value}', QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
@@ -339,10 +340,13 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
 
             # 保存回CSV文件
             df.to_csv(r'1.csv', index=False)
+            os.rename('1.csv', '1.xyz')
             print(f"Path {self.nearest_path} 的Z列已修改为 {new_z_value}")
             self.draw_image()  # 重新绘制图像
         else:
             print('已取消修改')
+
+            os.rename('1.csv', '1.xyz')
             return
 
         # 隐藏并删除所有输入框
@@ -371,6 +375,8 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
     def draw_image(self):
         # 清除之前的图形
         self.graphWidget.clear()
+        if self.check_file() == False:
+            return
         df = pd.read_csv(r"1.csv")
         # 根据Path列的不同，使用X Y绘制折线图
         for path_id in df['Path'].unique():
@@ -388,6 +394,7 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
         # 设置标题和标签
         self.graphWidget.setLabel('left', 'Y')
         self.graphWidget.setLabel('bottom', 'X')
+        os.rename('1.csv', '1.xyz')
 
     def load_file(self):
         self.filename, _ = QFileDialog.getOpenFileName(self, "加载SVG文件", "", "加载SVG(*.svg)")
@@ -419,6 +426,8 @@ class LoadMain(QMainWindow, Ui_MainWindow, QObject):
 
         # 存储到CSV文件
         df.to_csv(r'1.csv', index=False)
+        if self.check_file() == False:
+            return
         print("坐标数据已保存到 1.csv 文件中。")
 
 if __name__ == "__main__":
